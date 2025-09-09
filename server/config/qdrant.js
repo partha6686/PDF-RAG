@@ -6,37 +6,56 @@ const qdrantClient = new QdrantClient({
   url: process.env.QDRANT_URL || 'http://localhost:6333'
 });
 
-const COLLECTION_NAME = 'pdf_documents';
+const COLLECTION_NAME = 'pdf_documents_gemini'; // New collection name for Gemini embeddings
 
 /**
- * Initialize Qdrant collection
+ * Initialize Qdrant collection (recreate if dimension mismatch)
  */
 async function initializeQdrantCollection() {
   try {
+    const expectedDimension = getEmbeddingDimension();
+    
     // Check if collection exists
     const collections = await qdrantClient.getCollections();
     const collectionExists = collections.collections.some(
       collection => collection.name === COLLECTION_NAME
     );
 
-    if (!collectionExists) {
-      console.log('Creating Qdrant collection:', COLLECTION_NAME);
-      
-      await qdrantClient.createCollection(COLLECTION_NAME, {
-        vectors: {
-          size: getEmbeddingDimension(),
-          distance: 'Cosine', // Cosine similarity
-        },
-        optimizers_config: {
-          default_segment_number: 2,
-        },
-        replication_factor: 1,
-      });
-      
-      console.log('Qdrant collection created successfully');
-    } else {
-      console.log('Qdrant collection already exists');
+    if (collectionExists) {
+      try {
+        // Check if the existing collection has the correct dimension
+        const collectionInfo = await qdrantClient.getCollection(COLLECTION_NAME);
+        const currentDimension = collectionInfo.config.params.vectors.size;
+        
+        if (currentDimension !== expectedDimension) {
+          console.log(`Collection dimension mismatch (${currentDimension} vs ${expectedDimension}). Recreating collection...`);
+          await qdrantClient.deleteCollection(COLLECTION_NAME);
+          const collectionExists = false; // Force recreation
+        } else {
+          console.log('Qdrant collection already exists with correct dimension');
+          return;
+        }
+      } catch (error) {
+        console.log('Error checking collection info, will recreate:', error.message);
+        await qdrantClient.deleteCollection(COLLECTION_NAME).catch(() => {});
+      }
     }
+
+    // Create new collection
+    console.log(`Creating Qdrant collection: ${COLLECTION_NAME} (${expectedDimension}D)`);
+    
+    await qdrantClient.createCollection(COLLECTION_NAME, {
+      vectors: {
+        size: expectedDimension,
+        distance: 'Cosine', // Cosine similarity
+      },
+      optimizers_config: {
+        default_segment_number: 2,
+      },
+      replication_factor: 1,
+    });
+    
+    console.log('Qdrant collection created successfully');
   } catch (error) {
     console.error('Error initializing Qdrant collection:', error);
     throw error;

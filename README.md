@@ -23,7 +23,7 @@ That's it! The app will be available at:
 - ✅ **Redis queue system** for background PDF processing
 - ✅ **Qdrant vector database** for semantic search
 - ✅ **Google Gemini AI** for intelligent chat responses
-- ✅ **Local embeddings** using Sentence Transformers
+- ✅ **Gemini embeddings** for consistent AI integration
 
 ## Manual Setup (if needed)
 
