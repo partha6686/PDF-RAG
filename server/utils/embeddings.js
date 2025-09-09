@@ -36,7 +36,7 @@ async function generateEmbedding(text) {
         body: JSON.stringify({
           model: 'models/text-embedding-004',
           content: {
-            parts: [{ text: text }]
+            parts: [{ text: text.substring(0, 2048) }] // Limit text length for faster processing
           }
         })
       }
@@ -55,29 +55,59 @@ async function generateEmbedding(text) {
 }
 
 /**
- * Generate embeddings for multiple text chunks (with rate limiting)
+ * Generate embeddings for multiple text chunks (with progress callback)
  */
-async function generateBatchEmbeddings(texts) {
+async function generateBatchEmbeddings(texts, progressCallback = null) {
+  const BATCH_SIZE = 10; // Process 10 embeddings concurrently
+  const BATCH_DELAY = 50; // Reduced delay between batches
   const embeddings = [];
-  const BATCH_DELAY = 100; // 100ms delay between requests to respect rate limits
   
-  for (let i = 0; i < texts.length; i++) {
-    try {
-      const text = texts[i];
-      console.log(`Generating embedding ${i + 1}/${texts.length}`);
-      
-      const embedding = await generateEmbedding(text);
-      embeddings.push(embedding);
-      
-      // Add delay between requests to respect rate limits
-      if (i < texts.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
-      }
-    } catch (error) {
-      console.error(`Error generating embedding for chunk ${i + 1}:`, error);
-      // Push null for failed embeddings to maintain array alignment
-      embeddings.push(null);
+  console.log(`Generating embeddings for ${texts.length} chunks using concurrent batching...`);
+  
+  // Process in batches for better performance
+  for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+    const batch = texts.slice(i, i + BATCH_SIZE);
+    const batchNum = Math.floor(i/BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(texts.length/BATCH_SIZE);
+    
+    console.log(`Processing embedding batch ${batchNum}/${totalBatches}`);
+    
+    // Update progress if callback provided
+    if (progressCallback) {
+      const embeddingProgress = Math.round((i / texts.length) * 100);
+      progressCallback(`🧠 Generating embeddings... Batch ${batchNum}/${totalBatches} (${embeddingProgress}%)`);
     }
+    
+    // Process batch concurrently
+    const batchPromises = batch.map(async (text, index) => {
+      try {
+        const embedding = await generateEmbedding(text);
+        return { index: i + index, embedding, success: true };
+      } catch (error) {
+        console.error(`Error generating embedding for chunk ${i + index + 1}:`, error.message);
+        return { index: i + index, embedding: null, success: false };
+      }
+    });
+    
+    // Wait for all embeddings in this batch
+    const batchResults = await Promise.all(batchPromises);
+    
+    // Store results in correct order
+    batchResults.forEach(result => {
+      embeddings[result.index] = result.embedding;
+    });
+    
+    // Small delay between batches to respect rate limits
+    if (i + BATCH_SIZE < texts.length) {
+      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+    }
+  }
+  
+  const successCount = embeddings.filter(e => e !== null).length;
+  console.log(`Embedding generation completed: ${successCount}/${texts.length} successful`);
+  
+  if (progressCallback) {
+    progressCallback(`✅ Embeddings complete! Generated ${successCount}/${texts.length} embeddings`);
   }
   
   return embeddings;

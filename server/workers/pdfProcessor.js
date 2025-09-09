@@ -15,36 +15,53 @@ const pdfWorker = new Worker('pdf-processing', async (job) => {
   console.log(`Processing PDF: ${originalName} (ID: ${documentId})`);
   
   try {
-    // Update job progress
-    await job.updateProgress(10);
+    // Step 1: Extract text from PDF (5% of total work)
+    console.log('📄 Extracting text from PDF...');
+    await job.updateProgress({ percent: 5, message: '📄 Extracting text from PDF...' });
     
-    // Step 1: Extract text from PDF
-    console.log('Extracting text from PDF...');
     const rawText = await extractTextFromPDF(filePath);
-    await job.updateProgress(30);
+    console.log(`Extracted ${rawText.length} characters`);
     
-    // Step 2: Clean and normalize text
-    console.log('Cleaning text...');
+    // Step 2: Clean and normalize text (5% of total work)
+    console.log('🧹 Cleaning and normalizing text...');
+    await job.updateProgress({ percent: 10, message: '🧹 Cleaning and normalizing text...' });
+    
     const cleanedText = cleanText(rawText);
-    await job.updateProgress(40);
     
-    // Step 3: Chunk the text
-    console.log('Chunking text...');
+    // Step 3: Chunk the text (5% of total work)
+    console.log('✂️ Chunking text into segments...');
+    await job.updateProgress({ percent: 15, message: '✂️ Chunking text into segments...' });
+    
     const chunkSize = parseInt(process.env.CHUNK_SIZE) || 1000;
     const chunkOverlap = parseInt(process.env.CHUNK_OVERLAP) || 200;
     const chunks = chunkText(cleanedText, chunkSize, chunkOverlap);
-    await job.updateProgress(50);
+    console.log(`Created ${chunks.length} text chunks`);
     
-    // Step 4: Generate embeddings for chunks
-    console.log(`Generating embeddings for ${chunks.length} chunks...`);
+    // Step 4: Generate embeddings for chunks (75% of total work - most time consuming)
+    console.log(`🧠 Starting embedding generation for ${chunks.length} chunks...`);
+    await job.updateProgress({ percent: 20, message: `🧠 Generating embeddings for ${chunks.length} chunks...` });
+    
     const chunkTexts = chunks.map(chunk => chunk.text);
-    const embeddings = await generateBatchEmbeddings(chunkTexts);
-    await job.updateProgress(80);
     
-    // Step 5: Store in Qdrant
-    console.log('Storing chunks in vector database...');
+    // Progress callback for embedding generation
+    const embeddingProgressCallback = (statusMessage) => {
+      // Map embedding progress (0-100%) to overall progress (20-90%)
+      const embeddingPercent = parseFloat(statusMessage.match(/\((\d+)%\)/)?.[1] || '0');
+      const overallPercent = 20 + Math.round((embeddingPercent / 100) * 70);
+      
+      job.updateProgress({ 
+        percent: overallPercent, 
+        message: statusMessage 
+      }).catch(err => console.warn('Progress update failed:', err));
+    };
+    
+    const embeddings = await generateBatchEmbeddings(chunkTexts, embeddingProgressCallback);
+    
+    // Step 5: Store in Qdrant (10% of total work)
+    console.log('💾 Storing chunks in vector database...');
+    await job.updateProgress({ percent: 95, message: '💾 Storing chunks in vector database...' });
+    
     const storedCount = await storeDocumentChunks(documentId, chunks, embeddings);
-    await job.updateProgress(95);
     
     // Step 6: Cleanup - delete the uploaded file after processing
     try {
@@ -54,7 +71,7 @@ const pdfWorker = new Worker('pdf-processing', async (job) => {
       console.warn(`Could not delete temporary file ${filePath}:`, cleanupError.message);
     }
     
-    await job.updateProgress(100);
+    await job.updateProgress({ percent: 100, message: '🎉 PDF processing completed successfully!' });
     
     const result = {
       documentId,
@@ -62,7 +79,8 @@ const pdfWorker = new Worker('pdf-processing', async (job) => {
       totalChunks: chunks.length,
       storedChunks: storedCount,
       textLength: cleanedText.length,
-      status: 'completed'
+      status: 'completed',
+      message: '🎉 PDF processing completed successfully!'
     };
     
     console.log(`PDF processing completed for ${originalName}:`, result);

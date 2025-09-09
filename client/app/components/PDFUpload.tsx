@@ -8,6 +8,7 @@ export default function PDFUpload() {
   const [uploadStatus, setUploadStatus] = useState<string>('')
   const [jobId, setJobId] = useState<string | null>(null)
   const [processingStatus, setProcessingStatus] = useState<string>('')
+  const [progressPercent, setProgressPercent] = useState<number>(0)
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -62,14 +63,22 @@ export default function PDFUpload() {
           
           if (jobData.state === 'completed') {
             setProcessingStatus('✅ PDF processed successfully! Ready for questions.')
+            setProgressPercent(100)
             clearInterval(pollInterval)
           } else if (jobData.state === 'failed') {
             setProcessingStatus('❌ PDF processing failed. Please try uploading again.')
+            setProgressPercent(0)
             clearInterval(pollInterval)
-          } else if (jobData.state === 'active') {
-            setProcessingStatus(`🔄 Processing PDF... ${jobData.progress || 0}%`)
+          } else if (jobData.state === 'active' && jobData.progress) {
+            // Extract the detailed status message from the worker
+            const statusMessage = jobData.progress.message || `Processing... ${jobData.progress.percent || 0}%`
+            const percent = jobData.progress.percent || 0
+            
+            setProcessingStatus(statusMessage)
+            setProgressPercent(percent)
           } else {
             setProcessingStatus('⏳ PDF queued for processing...')
+            setProgressPercent(0)
           }
         }
       } catch (error) {
@@ -148,16 +157,32 @@ export default function PDFUpload() {
           )}
 
           {processingStatus && (
-            <div className={`mt-4 p-3 rounded ${
+            <div className={`mt-4 p-4 rounded-lg ${
               processingStatus.includes('✅') 
                 ? 'bg-green-50 border border-green-200 text-green-800'
                 : processingStatus.includes('❌')
                 ? 'bg-red-50 border border-red-200 text-red-800'
                 : 'bg-blue-50 border border-blue-200 text-blue-800'
             }`}>
-              <p className="text-sm font-medium">{processingStatus}</p>
+              <div className="flex justify-between items-center mb-2">
+                <p className="text-sm font-medium">{processingStatus}</p>
+                {!processingStatus.includes('✅') && !processingStatus.includes('❌') && (
+                  <span className="text-xs font-bold">{progressPercent}%</span>
+                )}
+              </div>
+              
+              {/* Progress bar for active processing */}
+              {!processingStatus.includes('✅') && !processingStatus.includes('❌') && progressPercent > 0 && (
+                <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
+                  <div 
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out" 
+                    style={{ width: `${progressPercent}%` }}
+                  ></div>
+                </div>
+              )}
+              
               {jobId && (
-                <p className="text-xs mt-1 opacity-75">Job ID: {jobId}</p>
+                <p className="text-xs mt-2 opacity-75 font-mono">Job ID: {jobId}</p>
               )}
             </div>
           )}
