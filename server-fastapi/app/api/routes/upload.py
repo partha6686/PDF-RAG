@@ -25,32 +25,32 @@ async def upload_pdf(
     db: Session = Depends(get_db)
 ):
     """Upload PDF file for processing"""
-    
+
     # Validate file type
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only PDF files are allowed"
         )
-    
+
     # Check file size
     if file.size and file.size > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"File too large. Maximum size: {settings.MAX_FILE_SIZE_MB}MB"
         )
-    
+
     try:
         # Generate unique identifiers
         document_id = str(uuid.uuid4())
-        
+
         # Read file content
         content = await file.read()
         file_size = len(content)
-        
+
         # Initialize storage service
         storage_service = StorageService()
-        
+
         # Upload file to MinIO
         from io import BytesIO
         file_stream = BytesIO(content)
@@ -59,7 +59,7 @@ async def upload_pdf(
             filename=f"{document_id}_{file.filename}",
             content_type="application/pdf"
         )
-        
+
         # Create database record
         db_document = DBDocument(
             document_id=document_id,
@@ -73,25 +73,30 @@ async def upload_pdf(
             qdrant_collection=f"doc_{document_id}",
             created_at=datetime.utcnow()
         )
-        
+
         db.add(db_document)
         db.commit()
         db.refresh(db_document)
-        
-        # Start background processing
+
+        # Generate process ID for tracking
+        process_id = str(uuid.uuid4())
+
+        # Start background processing with process ID
         background_tasks.add_task(
-            document_processor.process_document,
-            document_id
+            document_processor.process_document_with_id,
+            document_id,
+            process_id
         )
-        
+
         return DocumentUploadResponse(
             document_id=document_id,
             filename=db_document.filename,
             s3_key=s3_key,
             processing_status="pending",
-            message="PDF uploaded successfully. Processing started in background."
+            message="PDF uploaded successfully. Processing started in background.",
+            process_id=process_id
         )
-    
+
     except Exception as e:
         db.rollback()
         # TODO: Clean up MinIO file if needed
@@ -110,14 +115,14 @@ async def list_user_documents(
         documents = db.query(DBDocument).filter(
             DBDocument.user_id == current_user["user_id"]
         ).order_by(DBDocument.created_at.desc()).all()
-        
+
         document_list = [DocumentMetadata.model_validate(doc) for doc in documents]
-        
+
         return DocumentListResponse(
             documents=document_list,
             total=len(document_list)
         )
-    
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -137,30 +142,30 @@ async def delete_document(
             DBDocument.document_id == document_id,
             DBDocument.user_id == current_user["user_id"]
         ).first()
-        
+
         if not document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Document not found"
             )
-        
+
         # TODO: Delete from MinIO
         # storage_service = StorageService()
         # storage_service.delete_file(document.s3_key)
-        
+
         # TODO: Delete from Qdrant
         # qdrant_service = QdrantService()
         # await qdrant_service.delete_document_collection(document_id)
-        
+
         # Delete from database
         db.delete(document)
         db.commit()
-        
+
         return {
             "message": f"Document {document_id} deleted successfully",
             "document_id": document_id
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:

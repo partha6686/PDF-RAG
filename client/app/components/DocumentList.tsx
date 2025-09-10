@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 
 interface Document {
@@ -15,7 +15,9 @@ interface Document {
 }
 
 interface DocumentListProps {
-  onSelectDocument: (document: Document) => void
+
+
+    onSelectDocument: (document: Document | null) => void
   selectedDocumentId: string | null
 }
 
@@ -24,16 +26,15 @@ export default function DocumentList({ onSelectDocument, selectedDocumentId }: D
   const [documents, setDocuments] = useState<Document[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
-  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null)
 
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     try {
       const response = await fetch('http://localhost:8000/api/upload/documents', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       })
-      
+
       if (response.ok) {
         const data = await response.json()
         setDocuments(data.documents || [])
@@ -43,62 +44,58 @@ export default function DocumentList({ onSelectDocument, selectedDocumentId }: D
     } finally {
       setLoading(false)
     }
-  }
+  }, [token])
 
   useEffect(() => {
     if (token) {
       fetchDocuments()
-      // Set up auto-refresh for processing status
-      startAutoRefresh()
+      // No auto-refresh needed - process tracking handles updates
     }
-    
-    return () => {
-      if (refreshInterval) {
-        clearInterval(refreshInterval)
+  }, [token, fetchDocuments])
+
+  // Auto-refresh functions removed - no longer needed with process tracking
+
+  const trackProcessStatus = (processId: string) => {
+    // Start tracking this specific process
+    const trackInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`http://localhost:8000/api/processing/process/${processId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        })
+
+        if (response.ok) {
+          const processData = await response.json()
+
+          if (processData.status === 'completed' || processData.status === 'failed') {
+            // Stop tracking this process
+            clearInterval(trackInterval)
+            // Refresh the document list to show updated status
+            await fetchDocuments()
+          }
+        }
+      } catch (error) {
+        console.error('Error tracking process:', error)
+        clearInterval(trackInterval)
       }
-    }
-  }, [token])
+    }, 2000) // Check every 2 seconds
 
-  const startAutoRefresh = () => {
-    // Clear existing interval
-    if (refreshInterval) {
-      clearInterval(refreshInterval)
-    }
-    
-    // Start new interval - refresh every 3 seconds
-    const interval = setInterval(() => {
-      fetchDocuments()
-    }, 3000)
-    
-    setRefreshInterval(interval)
+    // Stop tracking after 2 minutes as fallback
+    setTimeout(() => {
+      clearInterval(trackInterval)
+    }, 120000)
   }
 
-  const stopAutoRefresh = () => {
-    if (refreshInterval) {
-      clearInterval(refreshInterval)
-      setRefreshInterval(null)
-    }
-  }
-
-  // Stop auto-refresh when all documents are processed
-  useEffect(() => {
-    const hasProcessingDocs = documents.some(doc => 
-      doc.processing_status === 'pending' || doc.processing_status === 'processing'
-    )
-    
-    if (!hasProcessingDocs && refreshInterval) {
-      stopAutoRefresh()
-    } else if (hasProcessingDocs && !refreshInterval) {
-      startAutoRefresh()
-    }
-  }, [documents])
+  // No more auto-refresh needed since we track processes individually
+  // The process tracking will handle refreshing when needed
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
 
     setUploading(true)
-    
+
     try {
       const formData = new FormData()
       formData.append('file', file)
@@ -114,6 +111,12 @@ export default function DocumentList({ onSelectDocument, selectedDocumentId }: D
       if (response.ok) {
         const data = await response.json()
         console.log('Upload successful:', data)
+
+        // Start tracking this specific process
+        if (data.process_id) {
+          trackProcessStatus(data.process_id)
+        }
+
         // Refresh document list
         await fetchDocuments()
         // Clear file input
@@ -146,7 +149,7 @@ export default function DocumentList({ onSelectDocument, selectedDocumentId }: D
         await fetchDocuments()
         // Clear selection if deleted document was selected
         if (selectedDocumentId === documentId) {
-          onSelectDocument(null as any)
+          onSelectDocument(null)
         }
       } else {
         const error = await response.json()
@@ -239,8 +242,19 @@ export default function DocumentList({ onSelectDocument, selectedDocumentId }: D
   return (
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
       <div className="p-4 border-b border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-800 mb-3">My Documents</h2>
-        
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-800">My Documents</h2>
+          <button
+            onClick={fetchDocuments}
+            className="p-1 text-gray-500 hover:text-gray-700 transition-colors"
+            title="Refresh documents"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
+
         {/* Upload Button */}
         <label className="block w-full">
           <input
@@ -251,7 +265,7 @@ export default function DocumentList({ onSelectDocument, selectedDocumentId }: D
             className="hidden"
           />
           <div className={`w-full p-3 border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors ${
-            uploading 
+            uploading
               ? 'border-gray-300 bg-gray-50 cursor-not-allowed'
               : 'border-blue-300 hover:border-blue-400 hover:bg-blue-50'
           }`}>

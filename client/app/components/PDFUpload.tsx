@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function PDFUpload() {
@@ -11,6 +11,7 @@ export default function PDFUpload() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [processingStatus, setProcessingStatus] = useState<string>('')
   const [progressPercent, setProgressPercent] = useState<number>(0)
+  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -32,7 +33,7 @@ export default function PDFUpload() {
     try {
       const formData = new FormData()
       formData.append('file', selectedFile)  // FastAPI expects 'file' parameter
-      
+
       const response = await fetch('http://localhost:8000/api/upload/', {
         method: 'POST',
         headers: {
@@ -44,11 +45,11 @@ export default function PDFUpload() {
       if (response.ok) {
         const data = await response.json()
         setUploadStatus('PDF uploaded successfully!')
-        setJobId(data.jobId)
+        setJobId(data.job_id)
         setSelectedFile(null)
-        
+
         // Start polling for processing status
-        pollProcessingStatus(data.jobId)
+        pollProcessingStatus(data.job_id)
       } else {
         setUploadStatus('Upload failed. Please try again.')
       }
@@ -59,7 +60,17 @@ export default function PDFUpload() {
     }
   }
 
+  const stopPolling = () => {
+    if (pollingInterval) {
+      clearInterval(pollingInterval)
+      setPollingInterval(null)
+    }
+  }
+
   const pollProcessingStatus = async (jobId: string) => {
+    // Clear any existing polling
+    stopPolling()
+
     const pollInterval = setInterval(async () => {
       try {
         const response = await fetch(`http://localhost:8000/api/jobs/${jobId}`, {
@@ -67,49 +78,67 @@ export default function PDFUpload() {
             'Authorization': `Bearer ${token}`,
           },
         })
+
         if (response.ok) {
           const jobData = await response.json()
-          
-          if (jobData.state === 'completed') {
+
+          if (jobData.status === 'completed') {
             setProcessingStatus('✅ PDF processed successfully! Ready for questions.')
             setProgressPercent(100)
-            clearInterval(pollInterval)
-          } else if (jobData.state === 'failed') {
+            stopPolling()
+            return
+          } else if (jobData.status === 'failed') {
             setProcessingStatus('❌ PDF processing failed. Please try uploading again.')
             setProgressPercent(0)
-            clearInterval(pollInterval)
-          } else if (jobData.state === 'active' && jobData.progress) {
+            stopPolling()
+            return
+          } else if (jobData.status === 'active' && jobData.progress) {
             // Extract the detailed status message from the worker
             const statusMessage = jobData.progress.message || `Processing... ${jobData.progress.percent || 0}%`
             const percent = jobData.progress.percent || 0
-            
+
             setProcessingStatus(statusMessage)
             setProgressPercent(percent)
           } else {
             setProcessingStatus('⏳ PDF queued for processing...')
             setProgressPercent(0)
           }
+        } else {
+          // HTTP error - stop polling
+          setProcessingStatus('❓ Unable to check processing status')
+          stopPolling()
         }
       } catch (error) {
         console.error('Error polling job status:', error)
         setProcessingStatus('❓ Unable to check processing status')
-        clearInterval(pollInterval)
+        stopPolling()
       }
     }, 2000)
 
-    // Stop polling after 2 minutes
+    setPollingInterval(pollInterval)
+
+    // Stop polling after 2 minutes as fallback
     setTimeout(() => {
-      clearInterval(pollInterval)
-      if (processingStatus && !processingStatus.includes('✅') && !processingStatus.includes('❌')) {
-        setProcessingStatus('⏰ Processing is taking longer than expected...')
+      if (pollingInterval) {
+        stopPolling()
+        if (processingStatus && !processingStatus.includes('✅') && !processingStatus.includes('❌')) {
+          setProcessingStatus('⏰ Processing is taking longer than expected...')
+        }
       }
     }, 120000)
   }
 
+  // Cleanup polling on component unmount
+  useEffect(() => {
+    return () => {
+      stopPolling()
+    }
+  }, [])
+
   return (
     <div className="flex flex-col h-full p-6 bg-gray-50 border-r border-gray-200">
       <h2 className="text-2xl font-bold mb-6 text-gray-800">Upload PDF</h2>
-      
+
       <div className="flex-1 flex flex-col items-center justify-center">
         <div className="w-full max-w-md">
           <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors">
@@ -126,7 +155,7 @@ export default function PDFUpload() {
                 strokeLinejoin="round"
               />
             </svg>
-            
+
             <label htmlFor="pdf-upload" className="cursor-pointer">
               <span className="text-lg font-medium text-gray-900">
                 Click to upload PDF
@@ -155,7 +184,7 @@ export default function PDFUpload() {
 
           {uploadStatus && (
             <div className={`mt-4 p-3 rounded ${
-              uploadStatus.includes('successfully') 
+              uploadStatus.includes('successfully')
                 ? 'bg-green-50 border border-green-200 text-green-800'
                 : uploadStatus.includes('failed')
                 ? 'bg-red-50 border border-red-200 text-red-800'
@@ -167,7 +196,7 @@ export default function PDFUpload() {
 
           {processingStatus && (
             <div className={`mt-4 p-4 rounded-lg ${
-              processingStatus.includes('✅') 
+              processingStatus.includes('✅')
                 ? 'bg-green-50 border border-green-200 text-green-800'
                 : processingStatus.includes('❌')
                 ? 'bg-red-50 border border-red-200 text-red-800'
@@ -179,17 +208,17 @@ export default function PDFUpload() {
                   <span className="text-xs font-bold">{progressPercent}%</span>
                 )}
               </div>
-              
+
               {/* Progress bar for active processing */}
               {!processingStatus.includes('✅') && !processingStatus.includes('❌') && progressPercent > 0 && (
                 <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-                  <div 
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out" 
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
                     style={{ width: `${progressPercent}%` }}
                   ></div>
                 </div>
               )}
-              
+
               {jobId && (
                 <p className="text-xs mt-2 opacity-75 font-mono">Job ID: {jobId}</p>
               )}

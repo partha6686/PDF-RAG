@@ -5,7 +5,7 @@ from enum import Enum
 
 class JobStatus(str, Enum):
     PENDING = "pending"
-    ACTIVE = "active" 
+    ACTIVE = "active"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -26,12 +26,12 @@ class DocumentMetadata(BaseModel):
     qdrant_collection: str
     created_at: datetime
     processed_at: Optional[datetime] = None
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 class ChunkData(BaseModel):
     chunk_id: int
-    document_id: str 
+    document_id: str
     text: str
     chunk_index: int
     chunk_size: int
@@ -94,7 +94,7 @@ class ChatInfo(BaseModel):
     title: str
     created_at: datetime
     updated_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 class ChatListResponse(BaseModel):
@@ -113,7 +113,7 @@ class ChatMessageInfo(BaseModel):
     content: str
     sources: Optional[str] = None
     created_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 class ChatWithMessages(ChatInfo):
@@ -126,3 +126,4 @@ class DocumentUploadResponse(BaseModel):
     s3_key: str
     processing_status: str
     message: str
+    process_id: str
