@@ -1,8 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function PDFUpload() {
+  const { token } = useAuth()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<string>('')
@@ -29,10 +31,13 @@ export default function PDFUpload() {
 
     try {
       const formData = new FormData()
-      formData.append('pdf', selectedFile)
-
-      const response = await fetch('http://localhost:3002/api/upload', {
+      formData.append('file', selectedFile)  // FastAPI expects 'file' parameter
+      
+      const response = await fetch('http://localhost:8000/api/upload/', {
         method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
         body: formData,
       })
 
@@ -57,7 +62,11 @@ export default function PDFUpload() {
   const pollProcessingStatus = async (jobId: string) => {
     const pollInterval = setInterval(async () => {
       try {
-        const response = await fetch(`http://localhost:3002/api/job/${jobId}`)
+        const response = await fetch(`http://localhost:8000/api/jobs/${jobId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        })
         if (response.ok) {
           const jobData = await response.json()
           
