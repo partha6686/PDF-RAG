@@ -9,10 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@clerk/nextjs": "^6.31.10",
     "next": "15.5.2",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "react-markdown": "^10.1.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
